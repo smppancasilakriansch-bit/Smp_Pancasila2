@@ -163,11 +163,20 @@ export async function syncAllLocalToSupabase(): Promise<SyncResult> {
     }
 
     const hasErrors = errors.length > 0;
+    const isMissingTables = errors.some(
+      (e) => e.includes('schema cache') || e.includes('does not exist') || e.includes('PGRST205')
+    );
+
+    let message = 'Seluruh data lokal berhasil dimigrasikan ke database Supabase!';
+    if (isMissingTables) {
+      message = 'Tabel database sekolah belum dibuat di Supabase. Buka Tab 2 "Setup Database & SQL", lalu klik "Salin SQL Script" dan jalankan di SQL Editor Supabase.';
+    } else if (hasErrors) {
+      message = `Sinkronisasi selesai dengan beberapa catatan: ${errors.join(', ')}`;
+    }
+
     return {
       success: !hasErrors,
-      message: hasErrors
-        ? `Sinkronisasi selesai dengan beberapa peringatan: ${errors.join(', ')}`
-        : 'Seluruh data lokal berhasil dimigrasikan ke database Supabase!',
+      message,
       counts,
       errors: hasErrors ? errors : undefined,
     };
@@ -217,7 +226,7 @@ export async function syncAllSupabaseToLocal(): Promise<SyncResult> {
 
     if (errSet) errors.push(`Settings: ${errSet.message}`);
     else if (settingsData) {
-      saveSchoolSettings(settingsData as SchoolSettings);
+      localStorage.setItem('smp_pancasila_settings', JSON.stringify(settingsData));
       counts.settings = 1;
     }
 
@@ -227,7 +236,7 @@ export async function syncAllSupabaseToLocal(): Promise<SyncResult> {
       .select('*');
     if (errPeo) errors.push(`People: ${errPeo.message}`);
     else if (peopleData && peopleData.length > 0) {
-      savePeople(peopleData as Person[]);
+      localStorage.setItem('smp_pancasila_people', JSON.stringify(peopleData));
       counts.people = peopleData.length;
     }
 
@@ -237,7 +246,7 @@ export async function syncAllSupabaseToLocal(): Promise<SyncResult> {
       .select('*');
     if (errNews) errors.push(`News: ${errNews.message}`);
     else if (newsData && newsData.length > 0) {
-      saveNewsList(newsData as News[]);
+      localStorage.setItem('smp_pancasila_news', JSON.stringify(newsData));
       counts.news = newsData.length;
     }
 
@@ -247,7 +256,7 @@ export async function syncAllSupabaseToLocal(): Promise<SyncResult> {
       .select('*');
     if (errAnn) errors.push(`Announcements: ${errAnn.message}`);
     else if (annData && annData.length > 0) {
-      saveAnnouncements(annData as Announcement[]);
+      localStorage.setItem('smp_pancasila_announcements', JSON.stringify(annData));
       counts.announcements = annData.length;
     }
 
@@ -257,7 +266,7 @@ export async function syncAllSupabaseToLocal(): Promise<SyncResult> {
       .select('*');
     if (errAch) errors.push(`Achievements: ${errAch.message}`);
     else if (achData && achData.length > 0) {
-      saveAchievements(achData as Achievement[]);
+      localStorage.setItem('smp_pancasila_achievements', JSON.stringify(achData));
       counts.achievements = achData.length;
     }
 
@@ -267,7 +276,7 @@ export async function syncAllSupabaseToLocal(): Promise<SyncResult> {
       .select('*');
     if (errGal) errors.push(`Galleries: ${errGal.message}`);
     else if (galData && galData.length > 0) {
-      saveGalleries(galData as Gallery[]);
+      localStorage.setItem('smp_pancasila_galleries', JSON.stringify(galData));
       counts.galleries = galData.length;
     }
 
@@ -277,7 +286,7 @@ export async function syncAllSupabaseToLocal(): Promise<SyncResult> {
       .select('*');
     if (errImg) errors.push(`Gallery Images: ${errImg.message}`);
     else if (imgData && imgData.length > 0) {
-      saveGalleryImages(imgData as GalleryImage[]);
+      localStorage.setItem('smp_pancasila_gallery_images', JSON.stringify(imgData));
       counts.galleryImages = imgData.length;
     }
 
@@ -287,7 +296,7 @@ export async function syncAllSupabaseToLocal(): Promise<SyncResult> {
       .select('*');
     if (errFac) errors.push(`Facilities: ${errFac.message}`);
     else if (facData && facData.length > 0) {
-      saveFacilities(facData as Facility[]);
+      localStorage.setItem('smp_pancasila_facilities', JSON.stringify(facData));
       counts.facilities = facData.length;
     }
 
@@ -297,18 +306,27 @@ export async function syncAllSupabaseToLocal(): Promise<SyncResult> {
       .select('*');
     if (errUsr) errors.push(`Users: ${errUsr.message}`);
     else if (usrData && usrData.length > 0) {
-      saveAdminUsers(usrData as AdminUser[]);
+      localStorage.setItem('smp_pancasila_admin_users_list', JSON.stringify(usrData));
       counts.users = usrData.length;
     }
 
     const hasErrors = errors.length > 0;
+    const isMissingTables = errors.some(
+      (e) => e.includes('schema cache') || e.includes('does not exist') || e.includes('PGRST205')
+    );
+
+    let message = 'Data dari Supabase berhasil disinkronkan ke cache lokal website!';
+    if (isMissingTables) {
+      message = 'Tabel database Supabase belum dibuat. Website saat ini tetap berjalan lancar menggunakan data server pusat & cache lokal.';
+    } else if (hasErrors) {
+      message = `Tarik data selesai dengan catatan: ${errors.join(', ')}`;
+    }
+
     return {
-      success: !hasErrors,
-      message: hasErrors
-        ? `Tarik data selesai dengan catatan: ${errors.join(', ')}`
-        : 'Data dari Supabase berhasil disinkronkan ke cache lokal website!',
+      success: !hasErrors || isMissingTables,
+      message,
       counts,
-      errors: hasErrors ? errors : undefined,
+      errors: hasErrors && !isMissingTables ? errors : undefined,
     };
   } catch (err: any) {
     return {

@@ -19,7 +19,7 @@ export function getSupabaseConfig(): {
   const storedAnonKey = (typeof window !== 'undefined' ? localStorage.getItem(STORAGE_KEYS.ANON_KEY) || '' : '').trim();
 
   // Stored override takes precedence if set, otherwise use env
-  if (storedUrl && storedAnonKey) {
+  if (storedUrl && storedAnonKey && !storedUrl.includes('your-project-id')) {
     return {
       url: storedUrl,
       anonKey: storedAnonKey,
@@ -45,12 +45,21 @@ export function getSupabaseConfig(): {
   };
 }
 
-export function saveSupabaseConfig(url: string, anonKey: string): void {
+export function saveSupabaseConfig(url: string, anonKey: string, bucket: string = 'school-media'): void {
   if (typeof window !== 'undefined') {
     localStorage.setItem(STORAGE_KEYS.URL, url.trim());
     localStorage.setItem(STORAGE_KEYS.ANON_KEY, anonKey.trim());
+    localStorage.setItem('smp_pancasila_supabase_bucket', (bucket || 'school-media').trim());
     // Re-initialize client
     initSupabaseClient();
+    // Replicate config to backend server so other devices get it automatically
+    fetch('/api/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: url.trim(), anonKey: anonKey.trim(), bucket: (bucket || 'school-media').trim() }),
+    }).catch(() => {
+      // offline / fallback
+    });
   }
 }
 
@@ -59,7 +68,66 @@ export function clearSupabaseConfig(): void {
     localStorage.removeItem(STORAGE_KEYS.URL);
     localStorage.removeItem(STORAGE_KEYS.ANON_KEY);
     initSupabaseClient();
+    // Clear from backend server as well
+    fetch('/api/config', { method: 'DELETE' }).catch(() => {});
   }
+}
+
+/**
+ * Fetch Supabase configuration from central server or static config
+ * This allows all devices and visitors to share the same Supabase configuration!
+ */
+export async function fetchServerSupabaseConfig(): Promise<{ url: string; anonKey: string; isConfigured: boolean } | null> {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const res = await fetch('/api/config');
+    if (res.ok) {
+      const data = await res.json();
+      if (
+        data?.supabase?.url &&
+        data?.supabase?.anonKey &&
+        !data.supabase.url.includes('your-project-id')
+      ) {
+        localStorage.setItem(STORAGE_KEYS.URL, data.supabase.url);
+        localStorage.setItem(STORAGE_KEYS.ANON_KEY, data.supabase.anonKey);
+        if (data.supabase.bucket) {
+          localStorage.setItem('smp_pancasila_supabase_bucket', data.supabase.bucket);
+        }
+        initSupabaseClient();
+        return {
+          url: data.supabase.url,
+          anonKey: data.supabase.anonKey,
+          isConfigured: true,
+        };
+      }
+    }
+  } catch {
+    // If API unavailable, fallback to static /supabase-config.json
+    try {
+      const resStatic = await fetch('/supabase-config.json');
+      if (resStatic.ok) {
+        const data = await resStatic.json();
+        if (data?.url && data?.anonKey && !data.url.includes('your-project-id')) {
+          localStorage.setItem(STORAGE_KEYS.URL, data.url);
+          localStorage.setItem(STORAGE_KEYS.ANON_KEY, data.anonKey);
+          if (data.bucket) {
+            localStorage.setItem('smp_pancasila_supabase_bucket', data.bucket);
+          }
+          initSupabaseClient();
+          return {
+            url: data.url,
+            anonKey: data.anonKey,
+            isConfigured: true,
+          };
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  return null;
 }
 
 // Global cached client instance
@@ -127,14 +195,36 @@ export async function testSupabaseConnection(): Promise<{
     const latencyMs = Math.round(performance.now() - startTime);
 
     if (error) {
-      // Check if it's a 404/PGRST204 meaning table doesn't exist yet, but connection was made!
-      if (error.code === '42P01' || error.message?.includes('relation "school_settings" does not exist')) {
+      // Check if it's missing table (PGRST205 / PGRST204 / 42P01 / schema cache)
+      const isMissingTable =
+        error.code === '42P01' ||
+        error.code === 'PGRST205' ||
+        error.code === 'PGRST204' ||
+        error.message?.includes('schema cache') ||
+        error.message?.includes('does not exist');
+
+      if (isMissingTable) {
+        // Also verify storage endpoint to confirm credentials and network are 100% active
+        try {
+          const { error: storageErr } = await client.storage.listBuckets();
+          if (!storageErr) {
+            return {
+              success: true,
+              latencyMs,
+              message: `Koneksi ke Supabase AKTIF & API Key Valid (${latencyMs}ms)! Tabel database belum dibuat. Silakan jalankan Skrip SQL di Tab 2 (Setup Database & SQL).`,
+            };
+          }
+        } catch {
+          // continue
+        }
+
         return {
           success: true,
           latencyMs,
-          message: 'Berhasil terhubung ke Supabase! Namun tabel database belum dibuat. Silakan jalankan Skrip SQL di Supabase SQL Editor.',
+          message: 'Berhasil terhubung ke Supabase! Namun tabel database belum dibuat. Silakan jalankan Skrip SQL di Tab 2 (Setup Database & SQL).',
         };
       }
+
       return {
         success: false,
         latencyMs,
